@@ -1,0 +1,230 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: "1.14.8"
+  TFLINT_VERSION: "0.63.1"
+  CHECKOV_VERSION: "3.3.2"
+  ZIZMOR_VERSION: "1.26.1"
+  INFRACOST_VERSION: "0.10.44"
+
+jobs:
+  terraform-hygiene:
+    name: Terraform Hygiene
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Install TFLint
+        env:
+          TFLINT_VERSION: ${{ env.TFLINT_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            --output /tmp/tflint.zip \
+            "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip"
+          unzip -q /tmp/tflint.zip -d /tmp/tflint
+          sudo install -m 0755 /tmp/tflint/tflint /usr/local/bin/tflint
+          tflint --version
+
+      - name: Terraform Format Check
+        run: terraform -chdir=infra fmt -check -recursive
+
+      - name: Terraform Init Without Backend
+        run: terraform -chdir=infra init -backend=false -input=false
+
+      - name: Terraform Validate
+        run: terraform -chdir=infra validate
+
+      - name: TFLint Init
+        run: tflint --init --config "$GITHUB_WORKSPACE/.github/validation/tflint.hcl"
+
+      - name: TFLint
+        run: tflint --chdir=infra --config "$GITHUB_WORKSPACE/.github/validation/tflint.hcl"
+
+  workflow-security:
+    name: Workflow Security
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor
+        env:
+          ZIZMOR_VERSION: ${{ env.ZIZMOR_VERSION }}
+        run: |
+          set -euo pipefail
+          python -m pip install --user "zizmor==${ZIZMOR_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run zizmor
+        run: zizmor --config .github/validation/zizmor.yml .github/workflows .github/actions
+
+  terraform-plan-checkov-infracost:
+    name: Terraform Plan, Checkov & Infracost (${{ matrix.environment }})
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs:
+      - terraform-hygiene
+      - workflow-security
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - dev
+          - prd
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_USE_OIDC: true
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      TF_ENV: ${{ matrix.environment }}
+      TF_VAR_stripe_secret_key: ${{ secrets.STRIPE_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Install Checkov
+        env:
+          CHECKOV_VERSION: ${{ env.CHECKOV_VERSION }}
+        run: |
+          set -euo pipefail
+          python -m pip install --user "checkov==${CHECKOV_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure State Container
+        uses: ./.github/actions/ensure-tfstate-container
+        with:
+          storage_account_name: sttfsplatform${{ matrix.environment }}uks01
+          container_name: ${{ github.event.repository.name }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_PLATFORM_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra init -input=false \
+            -backend-config="resource_group_name=rg-tfs-platform-${TF_ENV}-uks-01" \
+            -backend-config="storage_account_name=sttfsplatform${TF_ENV}uks01" \
+            -backend-config="container_name=${REPO_NAME}" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="subscription_id=${{ secrets.AZURE_PLATFORM_SUBSCRIPTION_ID }}"
+
+      - name: Terraform Plan
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra plan -input=false \
+            -var-file="vars/globals.tfvars" \
+            -var-file="vars/${TF_ENV}.tfvars" \
+            -out="tfplan-${TF_ENV}.binary"
+
+      - name: Terraform Plan JSON
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra show -json "tfplan-${TF_ENV}.binary" > "infra/tfplan-${TF_ENV}.json"
+
+      - name: Checkov Plan-Aware Deep Analysis
+        run: |
+          set -euo pipefail
+          checkov \
+            --config-file .github/validation/checkov.yaml \
+            --deep-analysis \
+            --repo-root-for-plan-enrichment infra \
+            -f "infra/tfplan-${TF_ENV}.json"
+
+      - name: Require Infracost API Key
+        run: |
+          set -euo pipefail
+          if [[ -z "${INFRACOST_API_KEY:-}" ]]; then
+            echo "INFRACOST_API_KEY is required for PR cost visibility." >&2
+            exit 1
+          fi
+
+      - name: Install Infracost
+        env:
+          INFRACOST_VERSION: ${{ env.INFRACOST_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            --output /tmp/infracost.tar.gz \
+            "https://github.com/infracost/infracost/releases/download/v${INFRACOST_VERSION}/infracost-linux-amd64.tar.gz"
+          tar -xzf /tmp/infracost.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/infracost-linux-amd64 /usr/local/bin/infracost
+          infracost --version
+
+      - name: Generate Infracost Diff
+        run: |
+          set -euo pipefail
+          infracost diff \
+            --path "infra/tfplan-${TF_ENV}.json" \
+            --format json \
+            --out-file "/tmp/infracost-${TF_ENV}.json"
+
+      - name: Post Infracost Comment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          infracost comment github \
+            --path "/tmp/infracost-${TF_ENV}.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pull-request "$PR_NUMBER" \
+            --github-token "$GITHUB_TOKEN" \
+            --behavior update \
+            --tag "infracost-${TF_ENV}"
+
+      - name: Break State Lease
+        if: always()
+        uses: ./.github/actions/break-tfstate-lease
+        with:
+          storage_account_name: sttfsplatform${{ matrix.environment }}uks01
+          container_name: ${{ github.event.repository.name }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_subscription_id: ${{ secrets.AZURE_PLATFORM_SUBSCRIPTION_ID }}

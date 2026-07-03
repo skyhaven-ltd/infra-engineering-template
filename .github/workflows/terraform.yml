@@ -31,7 +31,7 @@ permissions:
   id-token: write
 
 jobs:
-  terraform:
+  Terraform:
     name: "Terraform ${{ inputs.terraform_action || 'plan' }} (${{ inputs.env || 'dev' }})"
     runs-on: ubuntu-latest
     environment: ${{ inputs.env || 'dev' }}

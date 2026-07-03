@@ -10,7 +10,7 @@ on:
 permissions: {}
 
 jobs:
-  tag:
+  Tag:
     permissions:
       contents: write
     uses: skyhaven-ltd/pipeline-engineering-github-actions/.github/workflows/reusable-tag.yml@f5851503b5a5f3f08b349bca15a9324eae238ed1 # v1.0.0

@@ -1,0 +1,12 @@
+# MegaLinter configuration for infra repos.
+# Terraform IaC scanning (fmt, validate, TFLint, Checkov) is owned by the shared
+# reusable-terraform.yml PR-validation workflow, so those linters are disabled
+# here to avoid duplicate and conflicting findings. MegaLinter keeps the
+# general-purpose linters (YAML, JSON, Markdown, Bash, GitHub Actions, etc.).
+DISABLE_LINTERS:
+  - TERRAFORM_TFLINT
+  - TERRAFORM_TERRASCAN
+  - REPOSITORY_CHECKOV
+
+SHOW_ELAPSED_TIME: true
+FLAVOR_SUGGESTIONS: false

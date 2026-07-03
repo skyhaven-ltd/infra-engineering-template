@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   Lint:
-    uses: skyhaven-ltd/pipeline-engineering-github-actions/.github/workflows/reusable-lint.yml@f5851503b5a5f3f08b349bca15a9324eae238ed1 # v1.0.0
+    uses: skyhaven-ltd/pipeline-engineering-github-actions/.github/workflows/reusable-lint.yml@35c3928dd1e653238dc0de99c8658c916c703a1b # v1.0.1
     with:
       flavor: terraform
       config_file: .github/validation/.mega-linter.yml

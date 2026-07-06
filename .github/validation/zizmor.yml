@@ -2,8 +2,3 @@ rules:
   artipacked:
     ignore:
       - tag.yml
-  secrets-inherit:
-    # Deliberate: the shared reusable-terraform.yml requires secrets: inherit
-    # so per-environment secrets resolve in its environment-scoped plan job.
-    ignore:
-      - pr-validation.yml

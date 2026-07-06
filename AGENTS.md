@@ -18,8 +18,8 @@ When generating a repo from this template, update these placeholders:
 ```bash
 # Initialise — substitute <env> with dev or prd
 terraform -chdir=infra init \
-  -backend-config="resource_group_name=rg-tfs-platform-<env>-uks-01" \
-  -backend-config="storage_account_name=sttfsplatform<env>uks01" \
+  -backend-config="resource_group_name=rg-platform-<env>-uks-01" \
+  -backend-config="storage_account_name=stplatform<env>uks02" \
   -backend-config="container_name=<repo-name>" \
   -backend-config="key=terraform.tfstate" \
   -backend-config="subscription_id=<platform-subscription-id>"
@@ -72,22 +72,23 @@ State backend is environment-specific:
 
 | Env | Resource Group               | Storage Account         |
 | --- | ---------------------------- | ----------------------- |
-| dev | `rg-tfs-platform-dev-uks-01` | `sttfsplatformdevuks01` |
-| prd | `rg-tfs-platform-prd-uks-01` | `sttfsplatformprduks01` |
+| dev | `rg-platform-dev-uks-01` | `stplatformdevuks02` |
+| prd | `rg-platform-prd-uks-01` | `stplatformprduks02` |
 
 Each repo gets its own container named after the repository. The `ensure-tfstate-container` action creates it on first run; `break-tfstate-lease` cleans up stuck leases.
 
-## Required Secrets
+## Required Configuration
 
-GitHub environment secrets needed by the pipelines:
+GitHub environment **variables** needed by the pipelines (provisioned by `infra-landingzone-platform/scripts/bootstrap-platform.sh`; they are GUIDs, not secrets, so they stay viewable):
 
-| Secret                           | Used for                                                |
+| Variable                         | Used for                                                |
 | -------------------------------- | ------------------------------------------------------- |
 | `AZURE_CLIENT_ID`                | OIDC workload identity federated credential             |
 | `AZURE_SUBSCRIPTION_ID`          | Target subscription for ARM provider                    |
 | `AZURE_TENANT_ID`                | OIDC tenant                                             |
 | `AZURE_PLATFORM_SUBSCRIPTION_ID` | Platform subscription hosting the state storage account |
-| `INFRACOST_API_KEY`              | Infracost PR cost-visibility comments                   |
+
+Sensitive values (Infracost API key, plan-time `TF_VAR_*` secrets) live in the platform Key Vault (`kv-platform-<env>-uks-02`) and are fetched after OIDC login — declare plan-time secrets via the `tf_var_secrets` input in `pr-validation.yml`.
 
 ## Validation Config
 

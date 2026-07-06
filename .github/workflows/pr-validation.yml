@@ -15,11 +15,11 @@ permissions:
 
 jobs:
   Validate:
-    uses: skyhaven-ltd/pipeline-engineering-github-actions/.github/workflows/reusable-terraform.yml@35c3928dd1e653238dc0de99c8658c916c703a1b # v1.0.1
+    uses: skyhaven-ltd/pipeline-engineering-github-actions/.github/workflows/reusable-terraform.yml@6cfa143b42ff464e4101d69c09945db9fac369e5 # v2.0.0
     with:
       environments: '["dev","prd"]'
-    # inherit is required: the AZURE_* values are environment secrets, which an
-    # explicit secrets: mapping cannot see (it is evaluated outside any
-    # environment scope). zizmor's secrets-inherit finding is suppressed for
-    # this file in .github/validation/zizmor.yml.
-    secrets: inherit
+      # Azure identity comes from the AZURE_* GitHub environment variables;
+      # plan-time secrets are declared per line below and fetched from the
+      # platform Key Vault after OIDC login.
+      # tf_var_secrets: |
+      #   TF_VAR_example=example-kv-secret-name
